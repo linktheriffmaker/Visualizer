@@ -114,6 +114,14 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
       <fieldset>
         <legend>Colors</legend>
         <div class="pals" id="pals" role="group" aria-label="Color palette"></div>
+        <label class="field">Color reaction
+          <select id="react">
+            <option value="0">Off</option>
+            <option value="1">Subtle</option>
+            <option value="2" selected>Bold</option>
+          </select>
+        </label>
+        <p class="hint">Brings in colors from outside the palette when something new arrives, like a bright guitar note.</p>
       </fieldset>
 
       <fieldset>
@@ -174,11 +182,46 @@ const PALETTES = [
   { name: 'Bubblegum',   bg: ['#FFE0F0', '#FFC2E2'], stops: ['#FF2E93', '#7A3CFF', '#00A8FF'], head: '#2A0A3A', light: true }
 ];
 const hexRgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
-PALETTES.forEach(p => { p.rgb = p.stops.concat(p.stops[0]).map(hexRgb); });
+function rgbHue(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d) return 0;
+  let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+function hslRgb(h, s, l) {
+  const f = n => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+function outsideHues(p) {
+  const hs = p.rgb.slice(0, 3).map(c => rgbHue(c[0], c[1], c[2]));
+  const dist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+  const cand = [];
+  for (let h = 0; h < 360; h += 10) cand.push({ h, s: Math.min(...hs.map(x => dist(h, x))) });
+  cand.sort((a, b) => b.s - a.s);
+  const out = [];
+  for (const c of cand) {
+    if (c.s < 35) break;
+    if (out.every(o => dist(o, c.h) >= 55)) out.push(c.h);
+    if (out.length >= 4) break;
+  }
+  if (!out.length) out.push((hs[0] + 180) % 360);
+  return out;
+}
+PALETTES.forEach(p => { p.rgb = p.stops.concat(p.stops[0]).map(hexRgb); p.hues = outsideHues(p); });
+
+/* new-color accent: blends a hue from outside the palette into the flow after big changes */
+const acc = { amt: 0, hue: 0, rgb: [255, 255, 255], hold: 0, idx: 0, mode: 2 };
+let curT = 0;
 function colorAt(pal, u, a) {
   u = ((u % 1) + 1) % 1;
   const L = pal.rgb, f = u * (L.length - 1), i = Math.floor(f), k = f - i, p = L[i], q = L[i + 1];
-  return 'rgba(' + ((p[0] + (q[0] - p[0]) * k) | 0) + ',' + ((p[1] + (q[1] - p[1]) * k) | 0) + ',' + ((p[2] + (q[2] - p[2]) * k) | 0) + ',' + a + ')';
+  let r = p[0] + (q[0] - p[0]) * k, g = p[1] + (q[1] - p[1]) * k, b = p[2] + (q[2] - p[2]) * k;
+  if (acc.amt > .01) {
+    const w = acc.amt * (.3 + .7 * (.5 + .5 * Math.sin((u * 2 + curT * .5) * TAU)));
+    r += (acc.rgb[0] - r) * w; g += (acc.rgb[1] - g) * w; b += (acc.rgb[2] - b) * w;
+  }
+  return 'rgba(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ',' + a + ')';
 }
 function flowGrad(c, pal, x0, y0, x1, y1, shift) {
   const g = c.createLinearGradient(x0, y0, x1, y1);
@@ -202,6 +245,31 @@ const rawB = new Float32Array(NB), rawW = new Float32Array(WN);
 let run = .3, wavePk = .1, bassAvg = 0, lastBeat = 0;
 let fd = null, td = null, bandLo = [], bandHi = [];
 
+const prevB = new Float32Array(NB);
+let fluxAvg = .02, slowHi = .1, lastAcc = 0, lastEntry = 0;
+function triggerAccent(now, strength, hold) {
+  const pal = PALETTES[palIdx];
+  acc.hue = pal.hues[acc.idx++ % pal.hues.length];
+  acc.amt = strength; acc.hold = hold; lastAcc = now;
+}
+function updateAccent(now, dt) {
+  const pal = PALETTES[palIdx];
+  if (!acc.mode) { acc.amt = 0; return; }
+  const bold = acc.mode === 2, top = bold ? 1 : .6, thr = bold ? 1 : 1.5;
+  let flux = 0;
+  for (let k = 0; k < NB; k++) { const d = A.bands[k] - prevB[k]; if (d > 0) flux += d * (.4 + 1.2 * k / NB); prevB[k] = A.bands[k]; }
+  flux /= NB;
+  fluxAvg = fluxAvg * .97 + flux * .03;
+  const hi = A.mid * .4 + A.tre * .6, sl = 1 - Math.pow(.995, dt * 60);
+  slowHi += (hi - slowHi) * sl;
+  if (now - lastEntry > 2500 && hi > slowHi * 1.7 * thr + .12) { triggerAccent(now, top, 1.2); lastEntry = now; }
+  else if (now - lastAcc > 350 && flux > fluxAvg * 3 * thr + .08) triggerAccent(now, top * .65, 0);
+  if (acc.hold > 0) acc.hold -= dt; else acc.amt *= Math.pow(.975, dt * 60);
+  acc.hue += 12 * dt;
+  acc.rgb = hslRgb(acc.hue, 1, pal.light ? .5 : .58);
+}
+function resetAccent() { acc.amt = 0; acc.hold = 0; acc.idx = 0; slowHi = .1; fluxAvg = .02; prevB.fill(0); }
+
 function summarise(now, dt) {
   let b = 0, m = 0, t = 0;
   for (let k = 0; k < 15; k++) b += A.bands[k];
@@ -211,6 +279,7 @@ function summarise(now, dt) {
   bassAvg = bassAvg * .95 + A.bass * .05;
   if (A.bass > bassAvg * 1.28 + .06 && now - lastBeat > 200) { A.beat = 1; A.hit = true; lastBeat = now; }
   else A.beat *= Math.pow(.9, dt * 60);
+  updateAccent(now, dt);
 }
 function analyseReal(now, dt) {
   analyser.getByteFrequencyData(fd);
@@ -247,6 +316,8 @@ function synthAudio(now, dt) {
     const v = (.3 + .7 * kick * (1 - f * .7)) * (.55 + .45 * Math.sin(t * 1.9 + k * .42 + Math.sin(t * .7) * 2)) * (1 - f * .45) + .05 * Math.sin(t * 9 + k);
     A.bands[k] = clamp(v, 0, 1);
   }
+  const hp = t % 9, hiEnv = hp < 3 ? Math.exp(-hp * .8) : 0;
+  if (hiEnv > 0) for (let k = 36; k < NB; k++) A.bands[k] = clamp(A.bands[k] + hiEnv * .55 * (.6 + .4 * Math.sin(t * 14 + k)), 0, 1);
   const amp = .55 + .45 * kick;
   for (let j = 0; j < WN; j++) {
     const x = j / WN;
@@ -380,6 +451,7 @@ function modeBurst(c, pal, t, dt) {
 
 function renderFrame(now, dt) {
   const c = ctx, pal = PALETTES[palIdx], f = dt * 60, m = reduceMotion ? 0 : 1, t = now / 1000, P = MODES[style];
+  curT = t;
   c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
   if (!primed) {
     c.fillStyle = bgGrad(palIdx); c.fillRect(0, 0, W, H); primed = true;
@@ -477,7 +549,7 @@ async function loadFile(file) {
   } catch (e) {
     setStatus('Couldn\u2019t read that file. Try an MP3, WAV, M4A, OGG or FLAC.'); return;
   }
-  buffer = buf; dur = buf.duration; pos = 0; lastVideo = null; hasPlayed = false; run = .3; wavePk = .1;
+  buffer = buf; dur = buf.duration; pos = 0; lastVideo = null; hasPlayed = false; run = .3; wavePk = .1; resetAccent();
   fileBase = file.name.replace(/\.[^.]+$/, '').replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
   el.info.textContent = file.name + ' \u00b7 ' + fmt(dur) + ' \u00b7 press play';
   el.cta.hidden = true; setStatus('');
@@ -487,7 +559,16 @@ async function loadFile(file) {
 /* ---------- export ---------- */
 const slug = () => ((fileBase || 'waveform').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)) || 'waveform';
 async function saveFile(name, data) {
-  if (!downloads) { setStatus('Saving isn\u2019t available in this view. Open the page in Claude to save files.'); return; }
+  if (!downloads) {
+    try {
+      const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
+      const a = document.createElement('a'); a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setStatus('Saved ' + name + '.');
+    } catch (e) { setStatus('Couldn\u2019t save the file.'); }
+    return;
+  }
   try { await downloads.save({ filename: name, data }); setStatus('Saved ' + name + '.'); }
   catch (e) {
     if (e && e.code === 'declined') setStatus('Save canceled.');
@@ -585,7 +666,7 @@ PALETTES.forEach((p, i) => {
   b.type = 'button'; b.className = 'pal'; b.setAttribute('aria-pressed', String(i === palIdx));
   b.innerHTML = '<span class="sw" style="--b1:' + p.bg[0] + ';--b2:' + p.bg[1] + ';--g:' + p.stops.join(',') + '"></span><span>' + p.name + '</span>';
   b.addEventListener('click', () => {
-    palIdx = i; lookChanged();
+    palIdx = i; resetAccent(); lookChanged();
     palWrap.querySelectorAll('.pal').forEach((x, j) => x.setAttribute('aria-pressed', String(j === i)));
   });
   palWrap.appendChild(b);
@@ -599,6 +680,7 @@ const fileInput = $('file');
 $('pick').addEventListener('click', () => fileInput.click());
 el.cta.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => { const f = fileInput.files[0]; fileInput.value = ''; loadFile(f); });
+$('react').addEventListener('change', e => { acc.mode = Number(e.target.value); if (!acc.mode) acc.amt = 0; });
 $('safe').addEventListener('change', e => { $('safeBox').hidden = !e.target.checked; });
 
 el.play.addEventListener('click', togglePlay);
