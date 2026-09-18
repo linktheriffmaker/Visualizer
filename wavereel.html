@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wavereel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700&family=Unbounded:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F5F1FA; --panel:#FFFFFF; --ink:#1B1030; --muted:#5F5675; --line:#D9D0E8;
+  --accent:#FF4FA3; --accent-ink:#1A0620; --focus:#6C2BD9;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E0A16; --panel:#181225; --ink:#F3EEFA; --muted:#A79CBC; --line:#30264A;
+    --focus:#FFD166; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E0A16; --panel:#181225; --ink:#F3EEFA; --muted:#A79CBC; --line:#30264A;
+  --focus:#FFD166; color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:500 16px/1.5 "Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.app{max-width:1000px;margin:0 auto;padding:22px 20px 72px}
+h1{margin:0 0 22px;font:800 20px/1 "Unbounded","Arial Black",system-ui,sans-serif;letter-spacing:-.02em}
+.layout{display:grid;gap:28px}
+@media (min-width:860px){
+  .layout{grid-template-columns:auto minmax(320px,1fr);gap:56px;align-items:start}
+  .stage{position:sticky;top:20px}
+}
+.stage{display:grid;gap:14px;justify-items:center}
+.frame{
+  position:relative;width:min(100%,380px,calc(74vh*.5625));aspect-ratio:9/16;
+  border-radius:22px;overflow:hidden;background:#12041e;
+  box-shadow:0 40px 90px -40px rgba(140,40,220,.55),0 0 0 1px var(--line);
+}
+.frame.over{outline:4px dashed var(--accent);outline-offset:4px}
+canvas{display:block;width:100%;height:100%}
+.safe{position:absolute;left:5%;right:14%;top:10%;bottom:25%;border:2px dashed rgba(255,255,255,.75);border-radius:10px;pointer-events:none;mix-blend-mode:difference}
+.cta{
+  position:absolute;left:50%;bottom:6%;transform:translateX(-50%);white-space:nowrap;
+  border:0;border-radius:999px;padding:12px 20px;font:700 15px/1 "Figtree",system-ui,sans-serif;
+  color:#fff;background:rgba(10,4,20,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);cursor:pointer;
+}
+.transport{display:flex;align-items:center;gap:12px;width:100%}
+.round{
+  flex:none;width:48px;height:48px;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);
+  display:grid;place-items:center;cursor:pointer;
+}
+.round:disabled{opacity:.35;cursor:not-allowed}
+.round svg{width:20px;height:20px;fill:currentColor}
+.transport input[type=range]{flex:1;min-width:0;accent-color:var(--accent);height:32px}
+.time{flex:none;min-width:92px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted);font-size:14px}
+
+.panel{display:grid;gap:22px;max-width:460px}
+fieldset{border:0;margin:0;padding:0;display:grid;gap:10px;min-width:0}
+legend{padding:0;margin-bottom:10px;font-weight:700;font-size:15px}
+.fileinfo{margin:10px 0 0;color:var(--muted);font-size:14px}
+.btn{
+  min-height:46px;padding:0 12px;border-radius:12px;border:1.5px solid var(--line);background:var(--panel);
+  color:var(--ink);font:700 15px/1.15 "Figtree",system-ui,sans-serif;cursor:pointer;
+}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.seg .btn[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.pals{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.pal{
+  display:grid;gap:8px;padding:8px;border-radius:14px;border:1.5px solid var(--line);background:var(--panel);
+  color:var(--ink);font:600 13px/1.1 "Figtree",system-ui,sans-serif;text-align:left;cursor:pointer;
+}
+.pal[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);font-weight:700}
+.sw{display:block;height:38px;border-radius:9px;background:linear-gradient(180deg,var(--b1),var(--b2));position:relative}
+.sw::after{content:"";position:absolute;left:10%;right:10%;top:50%;height:8px;margin-top:-4px;border-radius:99px;background:linear-gradient(90deg,var(--g))}
+label.field{display:grid;gap:6px;font-size:14px;color:var(--muted);font-weight:600}
+select{
+  min-height:46px;width:100%;padding:0 14px;border-radius:12px;border:1.5px solid var(--line);
+  background:var(--panel);color:var(--ink);font:600 16px/1 "Figtree",system-ui,sans-serif;
+}
+.check{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;cursor:pointer}
+.check input{width:20px;height:20px;accent-color:var(--accent)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.hint{margin:0;color:var(--muted);font-size:14px}
+.status{margin:0;min-height:1.5em;font-size:14px;font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>Wavereel</h1>
+  <div class="layout">
+    <div class="stage">
+      <div class="frame" id="frame">
+        <canvas id="cv" width="1080" height="1920" role="img" aria-label="Live music visualiser preview"></canvas>
+        <div class="safe" id="safeBox" hidden></div>
+        <button class="cta" id="cta" type="button">Choose audio file</button>
+      </div>
+      <div class="transport">
+        <button class="round" id="play" type="button" aria-label="Play" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path id="playIcon" d="M7 4.5v15l13-7.5z"/></svg>
+        </button>
+        <input id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Playhead position" disabled>
+        <span class="time" id="time">0:00 / 0:00</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <fieldset>
+        <legend>Colors</legend>
+        <div class="pals" id="pals" role="group" aria-label="Color palette"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Look</legend>
+        <div class="seg" role="group" aria-label="Visualiser look">
+          <button class="btn" type="button" data-style="bars" aria-pressed="true">Bars and waves</button>
+          <button class="btn" type="button" data-style="kaleido" aria-pressed="false">Kaleidoscope</button>
+          <button class="btn" type="button" data-style="burst" aria-pressed="false">Starburst</button>
+        </div>
+        <label class="check"><input type="checkbox" id="safe"> Show TikTok safe area</label>
+      </fieldset>
+
+      <div>
+        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" hidden>
+        <button class="btn primary" id="pick" type="button" style="width:100%">Choose audio file</button>
+        <p class="fileinfo" id="fileinfo">Or drop a file on the preview. It's read on your device and never uploaded.</p>
+      </div>
+
+      <fieldset>
+        <legend>Export</legend>
+        <label class="field">Video length
+          <select id="clip">
+            <option value="15">15 seconds</option>
+            <option value="30">30 seconds</option>
+            <option value="60" selected>60 seconds</option>
+            <option value="full">Until the end</option>
+          </select>
+        </label>
+        <div class="row">
+          <button class="btn primary" id="rec" type="button" disabled>Record video</button>
+          <button class="btn" id="png" type="button" disabled>Save image</button>
+        </div>
+        <button class="btn" id="saveVideo" type="button" hidden></button>
+        <p class="hint">Video is 1080 × 1920 and records from the playhead. Keep this tab in front while it records. To save a still, pause on a frame you like, then choose Save image.</p>
+      </fieldset>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const W = 1080, H = 1920, CY = 860, CX = 540;
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fmt = t => { t = Math.max(0, Math.floor(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+const TAU = Math.PI * 2;
+
+/* ---------- palettes ---------- */
+const PALETTES = [
+  { name: 'Afterglow',   bg: ['#1A0426', '#3A0B3F'], stops: ['#FF2E93', '#FF7A45', '#FFD166'], head: '#FFFFFF', light: false },
+  { name: 'Neon duo',    bg: ['#04050C', '#0E0722'], stops: ['#25F4EE', '#7B8CFF', '#FE2C55'], head: '#FFFFFF', light: false },
+  { name: 'Ultraviolet', bg: ['#08021C', '#1A0A52'], stops: ['#B517FF', '#4D6BFF', '#00E5FF'], head: '#FFFFFF', light: false },
+  { name: 'Lime soda',   bg: ['#03150F', '#06301F'], stops: ['#F2FF3B', '#63FF7A', '#00E0C6'], head: '#FFFFFF', light: false },
+  { name: 'Bubblegum',   bg: ['#FFE0F0', '#FFC2E2'], stops: ['#FF2E93', '#7A3CFF', '#00A8FF'], head: '#2A0A3A', light: true }
+];
+const hexRgb = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+PALETTES.forEach(p => { p.rgb = p.stops.concat(p.stops[0]).map(hexRgb); });
+function colorAt(pal, u, a) {
+  u = ((u % 1) + 1) % 1;
+  const L = pal.rgb, f = u * (L.length - 1), i = Math.floor(f), k = f - i, p = L[i], q = L[i + 1];
+  return 'rgba(' + ((p[0] + (q[0] - p[0]) * k) | 0) + ',' + ((p[1] + (q[1] - p[1]) * k) | 0) + ',' + ((p[2] + (q[2] - p[2]) * k) | 0) + ',' + a + ')';
+}
+function flowGrad(c, pal, x0, y0, x1, y1, shift) {
+  const g = c.createLinearGradient(x0, y0, x1, y1);
+  for (let k = 0; k <= 6; k++) g.addColorStop(k / 6, colorAt(pal, k / 6 + shift, 1));
+  return g;
+}
+function rrPath(c, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+
+/* ---------- audio analysis state ---------- */
+const NB = 64, WN = 256;
+const A = { bands: new Float32Array(NB), wave: new Float32Array(WN), bass: 0, mid: 0, tre: 0, beat: 0, hit: false };
+const rawB = new Float32Array(NB), rawW = new Float32Array(WN);
+let run = .3, wavePk = .1, bassAvg = 0, lastBeat = 0;
+let fd = null, td = null, bandLo = [], bandHi = [];
+
+function summarise(now, dt) {
+  let b = 0, m = 0, t = 0;
+  for (let k = 0; k < 15; k++) b += A.bands[k];
+  for (let k = 15; k < 39; k++) m += A.bands[k];
+  for (let k = 39; k < NB; k++) t += A.bands[k];
+  A.bass = b / 15; A.mid = m / 24; A.tre = t / 25;
+  bassAvg = bassAvg * .95 + A.bass * .05;
+  if (A.bass > bassAvg * 1.28 + .06 && now - lastBeat > 200) { A.beat = 1; A.hit = true; lastBeat = now; }
+  else A.beat *= Math.pow(.9, dt * 60);
+}
+function analyseReal(now, dt) {
+  analyser.getByteFrequencyData(fd);
+  analyser.getByteTimeDomainData(td);
+  let lvl = 0;
+  for (let k = 0; k < NB; k++) {
+    let mx = 0;
+    for (let i = bandLo[k]; i < bandHi[k]; i++) if (fd[i] > mx) mx = fd[i];
+    const v = mx / 255 * (.75 + .6 * k / NB);
+    rawB[k] = v; if (v > lvl) lvl = v;
+  }
+  run = Math.max(lvl, run * Math.pow(.9985, dt * 60));
+  const norm = 1 / Math.max(run, .3), dec = Math.pow(.8, dt * 60);
+  for (let k = 0; k < NB; k++) {
+    const v = Math.pow(clamp(rawB[k] * norm, 0, 1), 1.35);
+    A.bands[k] = Math.max(v, A.bands[k] * dec);
+  }
+  let s0 = 0;
+  for (let i = 1; i < td.length / 2; i++) if (td[i - 1] < 128 && td[i] >= 128) { s0 = i; break; }
+  let pk = 0;
+  for (let j = 0; j < WN; j++) { const w = (td[s0 + j * 4] - 128) / 128; rawW[j] = w; if (Math.abs(w) > pk) pk = Math.abs(w); }
+  wavePk = Math.max(pk, wavePk * Math.pow(.995, dt * 60));
+  const g = clamp(.8 / Math.max(wavePk, .04), 1, 10);
+  for (let j = 0; j < WN; j++) {
+    const a = rawW[Math.max(0, j - 1)], b = rawW[j], c = rawW[Math.min(WN - 1, j + 1)];
+    A.wave[j] = clamp((a + b * 2 + c) / 4 * g, -1.2, 1.2);
+  }
+  summarise(now, dt);
+}
+function synthAudio(now, dt) {
+  const t = now / 1000, ph = (t * 2.1) % 1, kick = Math.exp(-ph * 5.5);
+  for (let k = 0; k < NB; k++) {
+    const f = k / NB;
+    const v = (.3 + .7 * kick * (1 - f * .7)) * (.55 + .45 * Math.sin(t * 1.9 + k * .42 + Math.sin(t * .7) * 2)) * (1 - f * .45) + .05 * Math.sin(t * 9 + k);
+    A.bands[k] = clamp(v, 0, 1);
+  }
+  const amp = .55 + .45 * kick;
+  for (let j = 0; j < WN; j++) {
+    const x = j / WN;
+    A.wave[j] = amp * (Math.sin(x * TAU * 3 + t * 6) * .55 + Math.sin(x * TAU * 7 - t * 9) * .25 * Math.sin(t * 1.3) + Math.sin(x * TAU * 13 + t * 3) * .12);
+  }
+  summarise(now, dt);
+}
+
+/* ---------- rendering ---------- */
+const cv = $('cv'), ctx = cv.getContext('2d');
+const fbc = document.createElement('canvas'); fbc.width = W; fbc.height = H;
+const fbx = fbc.getContext('2d');
+const bgGrads = [];
+function bgGrad(i) {
+  if (!bgGrads[i]) {
+    const p = PALETTES[i], g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, p.bg[0]); g.addColorStop(1, p.bg[1]); bgGrads[i] = g;
+  }
+  return bgGrads[i];
+}
+const MODES = {
+  bars:    { zoom: .004, zb: .012, rot: 0,    keep: .90 },
+  kaleido: { zoom: .010, zb: .020, rot: .010, keep: .92 },
+  burst:   { zoom: .018, zb: .025, rot: .004, keep: .93 }
+};
+let style = 'bars', palIdx = 0, primed = false;
+
+const caps = new Float32Array(40), barH = new Float32Array(40);
+function modeBars(c, pal, t, dt) {
+  const n = 40, pitch = W / n, bw = pitch * .6, maxH = 520, shift = t * .06, glow = !pal.light;
+  for (let i = 0; i < n; i++) {
+    const x = i * (NB - 1) / (n - 1), a = Math.floor(x), b = Math.min(NB - 1, a + 1);
+    const v = A.bands[a] * (1 - (x - a)) + A.bands[b] * (x - a);
+    barH[i] = 14 + v * maxH * (1 + A.beat * .1);
+  }
+  if (glow) {
+    c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < n; i++) {
+      c.fillStyle = colorAt(pal, i / n * .9 + shift, .16); c.beginPath();
+      rrPath(c, i * pitch + (pitch - bw) / 2 - 10, CY - barH[i] - 10, bw + 20, barH[i] * 2 + 20, (bw + 20) / 2); c.fill();
+    }
+    c.globalCompositeOperation = 'source-over';
+  }
+  for (let i = 0; i < n; i++) {
+    c.fillStyle = colorAt(pal, i / n * .9 + shift, .95); c.beginPath();
+    rrPath(c, i * pitch + (pitch - bw) / 2, CY - barH[i], bw, barH[i] * 2, bw / 2); c.fill();
+  }
+  c.fillStyle = pal.head; c.globalAlpha = .85;
+  for (let i = 0; i < n; i++) {
+    caps[i] = Math.max(barH[i], caps[i] - 320 * dt);
+    const x = i * pitch + (pitch - bw) / 2;
+    c.beginPath(); rrPath(c, x, CY - caps[i] - 22, bw, 8, 4); rrPath(c, x, CY + caps[i] + 14, bw, 8, 4); c.fill();
+  }
+  c.globalAlpha = 1;
+  const waves = [{ amp: 300, ph: 0, w: 12, sh: 0, y: 0 }, { amp: 210, ph: 70, w: 6, sh: .33, y: 1 }, { amp: 150, ph: 150, w: 4, sh: .66, y: -1 }];
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  for (const o of waves) {
+    const amp = o.amp * (.55 + A.bass * .9), yc = CY + Math.sin(t * .9 + o.ph) * 80 * o.y;
+    c.beginPath();
+    for (let j = 0; j < WN; j++) {
+      const x = j / (WN - 1) * W, y = yc + A.wave[(j + o.ph) % WN] * amp;
+      if (j) c.lineTo(x, y); else c.moveTo(x, y);
+    }
+    c.strokeStyle = flowGrad(c, pal, 0, 0, W, 0, t * .08 + o.sh);
+    if (glow) { c.globalCompositeOperation = 'lighter'; c.globalAlpha = .18; c.lineWidth = o.w * 3.2; c.stroke(); c.globalCompositeOperation = 'source-over'; }
+    c.globalAlpha = 1; c.lineWidth = o.w; c.stroke();
+  }
+}
+function modeKaleido(c, pal, t) {
+  const K = 12, shift = t * .07, rot = t * .22 + A.beat * .15, R0 = 150 + A.bass * 120, glow = !pal.light;
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  const len = 430 + A.mid * 180, amp = 110 + A.bass * 170;
+  for (let k = 0; k < K; k++) {
+    c.save(); c.translate(CX, CY); c.rotate(rot + k * TAU / K); if (k & 1) c.scale(1, -1);
+    c.beginPath();
+    for (let j = 0; j < WN; j++) {
+      const x = R0 * .55 + j / (WN - 1) * len, y = A.wave[j] * amp;
+      if (j) c.lineTo(x, y); else c.moveTo(x, y);
+    }
+    if (glow) { c.globalCompositeOperation = 'lighter'; c.strokeStyle = colorAt(pal, k / K + shift, .16); c.lineWidth = 22; c.stroke(); c.globalCompositeOperation = 'source-over'; }
+    c.strokeStyle = colorAt(pal, k / K + shift, .95); c.lineWidth = 6; c.stroke();
+    c.restore();
+  }
+  const ring = (rad, ra, col, w) => {
+    c.beginPath();
+    for (let j = 0; j <= WN * 2; j++) {
+      const idx = j < WN ? j : 2 * WN - 1 - j, th = j / (WN * 2) * TAU - Math.PI / 2, r = rad + A.wave[Math.min(WN - 1, idx)] * ra;
+      const x = CX + Math.cos(th) * r, y = CY + Math.sin(th) * r;
+      if (j) c.lineTo(x, y); else c.moveTo(x, y);
+    }
+    c.closePath(); c.strokeStyle = col; c.lineWidth = w; c.stroke();
+  };
+  ring(R0, 70 + A.bass * 110, colorAt(pal, shift + .5, .95), 9);
+  ring(R0 * .62, 40 + A.bass * 60, pal.head, 4);
+}
+const rings = [];
+function modeBurst(c, pal, t, dt) {
+  const n = 96, shift = t * .06, R0 = 140 + A.bass * 70, glow = !pal.light, spin = t * .15;
+  if (A.hit) rings.push({ r: R0, a: 1 });
+  c.lineCap = 'round';
+  const lens = [];
+  for (let i = 0; i < n; i++) {
+    const tt = i / n, m = tt < .5 ? tt * 2 : (1 - tt) * 2, x = m * (NB - 1), a = Math.floor(x), b = Math.min(NB - 1, a + 1);
+    lens.push(30 + (A.bands[a] * (1 - (x - a)) + A.bands[b] * (x - a)) * 360 * (1 + A.beat * .12));
+  }
+  for (let pass = glow ? 0 : 1; pass < 2; pass++) {
+    if (pass === 0) c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < n; i++) {
+      const tt = i / n, ang = tt * TAU - Math.PI / 2 + spin, ca = Math.cos(ang), sa = Math.sin(ang);
+      c.beginPath(); c.moveTo(CX + ca * R0, CY + sa * R0); c.lineTo(CX + ca * (R0 + lens[i]), CY + sa * (R0 + lens[i]));
+      c.strokeStyle = colorAt(pal, tt + shift, pass ? .95 : .15); c.lineWidth = pass ? 13 : 30; c.stroke();
+    }
+    c.globalCompositeOperation = 'source-over';
+  }
+  for (let i = rings.length - 1; i >= 0; i--) {
+    const o = rings[i]; o.r += 700 * dt; o.a -= 1.3 * dt;
+    if (o.a <= 0) { rings.splice(i, 1); continue; }
+    c.beginPath(); c.arc(CX, CY, o.r, 0, TAU); c.strokeStyle = colorAt(pal, shift + o.r / 1000, o.a * .7); c.lineWidth = 6 + o.a * 8; c.stroke();
+  }
+  const dr = R0 - 14, g = c.createRadialGradient(CX, CY, 0, CX, CY, dr);
+  g.addColorStop(0, colorAt(pal, shift + .3, .95)); g.addColorStop(1, pal.bg[0]);
+  c.beginPath(); c.arc(CX, CY, dr, 0, TAU); c.fillStyle = g; c.fill();
+  c.lineWidth = 5; c.strokeStyle = pal.head; c.stroke();
+  c.beginPath();
+  for (let j = 0; j < WN; j++) {
+    const x = CX - dr + 24 + j / (WN - 1) * (dr * 2 - 48), y = CY + A.wave[j] * 60;
+    if (j) c.lineTo(x, y); else c.moveTo(x, y);
+  }
+  c.lineWidth = 5; c.lineJoin = 'round'; c.strokeStyle = pal.head; c.stroke();
+}
+
+function renderFrame(now, dt) {
+  const c = ctx, pal = PALETTES[palIdx], f = dt * 60, m = reduceMotion ? 0 : 1, t = now / 1000, P = MODES[style];
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  if (!primed) {
+    c.fillStyle = bgGrad(palIdx); c.fillRect(0, 0, W, H); primed = true;
+  } else {
+    fbx.globalCompositeOperation = 'copy'; fbx.drawImage(cv, 0, 0);
+    c.fillStyle = bgGrad(palIdx); c.fillRect(0, 0, W, H);
+    const z = 1 + (P.zoom + A.bass * P.zb) * f * m;
+    const r = (P.rot * (1 + A.mid * 2) + (style === 'bars' ? Math.sin(t * .5) * .003 : 0)) * f * m;
+    c.save(); c.globalAlpha = Math.pow(P.keep, f);
+    c.translate(CX, CY); c.rotate(r); c.scale(z, z); c.translate(-CX, -CY);
+    c.drawImage(fbc, 0, 0); c.restore();
+  }
+  if (!pal.light) {
+    const g = c.createRadialGradient(CX, CY, 0, CX, CY, 720);
+    g.addColorStop(0, colorAt(pal, t * .05, .10 + A.bass * .14)); g.addColorStop(1, colorAt(pal, t * .05, 0));
+    c.globalCompositeOperation = 'lighter'; c.fillStyle = g; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'source-over';
+  }
+  c.save();
+  if (style === 'kaleido') modeKaleido(c, pal, t);
+  else if (style === 'burst') modeBurst(c, pal, t, dt);
+  else modeBars(c, pal, t, dt);
+  c.restore();
+  c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+  A.hit = false;
+}
+function renderStill() {
+  primed = false;
+  for (let i = 0; i < 22; i++) {
+    const now = 631 + i * 16;
+    if (!hasPlayed) synthAudio(now, 1 / 60);
+    renderFrame(now, 1 / 60);
+  }
+}
+
+/* ---------- state ---------- */
+let buffer = null, dur = 0, pos = 0, playing = false, hasPlayed = false, restyle = true, fileBase = '';
+let ac = null, analyser = null, master = null, recDest = null, src = null, startedAt = 0, offset = 0;
+let rec = null, recChunks = [], recInfo = null, lastVideo = null, downloads = null;
+const el = { play: $('play'), scrub: $('scrub'), time: $('time'), rec: $('rec'), png: $('png'), saveVideo: $('saveVideo'),
+  status: $('status'), clip: $('clip'), info: $('fileinfo'), cta: $('cta'), frame: $('frame') };
+const setStatus = msg => { el.status.textContent = msg; };
+
+/* ---------- audio ---------- */
+function ensureAudio() {
+  if (ac) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  ac = new AC();
+  analyser = ac.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = .6;
+  analyser.minDecibels = -85; analyser.maxDecibels = -15;
+  fd = new Uint8Array(analyser.frequencyBinCount); td = new Uint8Array(analyser.fftSize);
+  const binHz = ac.sampleRate / analyser.fftSize, maxBin = analyser.frequencyBinCount;
+  for (let k = 0; k < NB; k++) {
+    const f0 = 40 * Math.pow(14000 / 40, k / NB), f1 = 40 * Math.pow(14000 / 40, (k + 1) / NB);
+    const lo = Math.max(1, Math.floor(f0 / binHz));
+    bandLo.push(lo); bandHi.push(Math.max(lo + 1, Math.min(maxBin, Math.ceil(f1 / binHz))));
+  }
+  master = ac.createGain();
+  analyser.connect(master); master.connect(ac.destination);
+  if (ac.createMediaStreamDestination) { recDest = ac.createMediaStreamDestination(); master.connect(recDest); }
+}
+const curPos = () => playing ? clamp(offset + (ac.currentTime - startedAt), 0, dur) : pos;
+function stopSource() {
+  if (src) { try { src.onended = null; src.stop(); } catch (e) {} try { src.disconnect(); } catch (e) {} src = null; }
+}
+function play(from) {
+  ensureAudio(); if (ac.state === 'suspended') ac.resume();
+  stopSource();
+  const s = ac.createBufferSource(); s.buffer = buffer; s.connect(analyser);
+  s.start(0, clamp(from, 0, Math.max(0, dur - .01)));
+  src = s; offset = from; startedAt = ac.currentTime; pos = from; playing = true; hasPlayed = true;
+}
+function pausePlayback() { if (playing) pos = curPos(); stopSource(); playing = false; }
+function togglePlay() {
+  if (!buffer || rec) return;
+  if (playing) pausePlayback(); else play(pos >= dur - .05 ? 0 : pos);
+}
+function tick() {
+  if (playing) { pos = curPos(); if (pos >= dur - .02) { pausePlayback(); pos = dur; } }
+  if (rec && rec.state === 'recording' && (!playing || pos - recInfo.start >= recInfo.len - .02)) stopRecording();
+}
+setInterval(tick, 100);
+
+async function loadFile(file) {
+  if (!file) return;
+  const okName = /\.(mp3|wav|m4a|aac|ogg|oga|opus|flac|aif|aiff|caf|webm|mp4)$/i.test(file.name);
+  if (file.type && !file.type.startsWith('audio/') && !okName) { setStatus('That doesn\u2019t look like an audio file. Try an MP3, WAV, M4A, OGG or FLAC.'); return; }
+  if (rec) stopRecording();
+  pausePlayback();
+  setStatus('Reading ' + file.name + '\u2026');
+  let buf;
+  try {
+    ensureAudio();
+    const ab = await file.arrayBuffer();
+    buf = await new Promise((res, rej) => { const p = ac.decodeAudioData(ab, res, rej); if (p && p.catch) p.catch(rej); });
+  } catch (e) {
+    setStatus('Couldn\u2019t read that file. Try an MP3, WAV, M4A, OGG or FLAC.'); return;
+  }
+  buffer = buf; dur = buf.duration; pos = 0; lastVideo = null; hasPlayed = false; run = .3; wavePk = .1;
+  fileBase = file.name.replace(/\.[^.]+$/, '').replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  el.info.textContent = file.name + ' \u00b7 ' + fmt(dur) + ' \u00b7 press play';
+  el.cta.hidden = true; setStatus('');
+  syncUI(true); restyle = true;
+}
+
+/* ---------- export ---------- */
+const slug = () => ((fileBase || 'waveform').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)) || 'waveform';
+async function saveFile(name, data) {
+  if (!downloads) { setStatus('Saving isn\u2019t available in this view. Open the page in Claude to save files.'); return; }
+  try { await downloads.save({ filename: name, data }); setStatus('Saved ' + name + '.'); }
+  catch (e) {
+    if (e && e.code === 'declined') setStatus('Save canceled.');
+    else if (e && e.code === 'rate_limited') setStatus('A save prompt is already open. Answer it, then try again.');
+    else setStatus('Couldn\u2019t save the file' + (e && e.message ? ' (' + e.message + ')' : '') + '.');
+  }
+}
+function savePng() {
+  if (!buffer) return;
+  cv.toBlob(b => { if (b) saveFile('wavereel-' + slug() + '.png', b); else setStatus('Couldn\u2019t make the image.'); }, 'image/png');
+}
+function pickMime() {
+  if (typeof MediaRecorder === 'undefined') return null;
+  const list = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4',
+    'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  return list.find(t => MediaRecorder.isTypeSupported(t)) || '';
+}
+async function startRecording() {
+  if (!buffer || rec) return;
+  const mime = pickMime();
+  if (mime === null || !cv.captureStream) { setStatus('Video recording isn\u2019t supported in this browser. Try a recent Chrome, Edge or Safari.'); return; }
+  ensureAudio();
+  try { await ac.resume(); } catch (e) {}
+  const start = pos >= dur - .5 ? 0 : pos;
+  const sel = el.clip.value;
+  const len = sel === 'full' ? dur - start : Math.min(Number(sel), dur - start);
+  let r;
+  try {
+    const tracks = cv.captureStream(30).getVideoTracks();
+    if (recDest) tracks.push(...recDest.stream.getAudioTracks());
+    const opts = mime ? { mimeType: mime, videoBitsPerSecond: 9e6, audioBitsPerSecond: 192e3 } : {};
+    r = new MediaRecorder(new MediaStream(tracks), opts);
+  } catch (e) { setStatus('Couldn\u2019t start recording in this browser.'); return; }
+  recChunks = []; lastVideo = null; setStatus('');
+  r.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+  r.onstop = () => {
+    const type = (r.mimeType || mime || 'video/webm').split(';')[0];
+    const blob = new Blob(recChunks, { type });
+    lastVideo = blob.size ? { blob, ext: type.includes('mp4') ? 'mp4' : 'webm' } : null;
+    rec = null; recChunks = [];
+    setStatus(lastVideo ? '' : 'Nothing was recorded. Try again.');
+    syncUI(true);
+  };
+  rec = r; recInfo = { start, len };
+  r.start(500);
+  play(start);
+  syncUI(true);
+}
+function stopRecording() {
+  if (!rec) return;
+  if (rec.state !== 'inactive') rec.stop();
+  pausePlayback();
+}
+
+/* ---------- ui ---------- */
+let lastTime = '', lastRec = '', dragging = false, resumeAfter = false;
+function syncUI(force) {
+  const loaded = !!buffer, recording = !!rec;
+  if (force) {
+    el.play.disabled = !loaded || recording; el.scrub.disabled = !loaded || recording;
+    el.png.disabled = !loaded || recording; el.rec.disabled = !loaded; el.clip.disabled = recording;
+    if (lastVideo) {
+      el.saveVideo.hidden = false;
+      el.saveVideo.textContent = 'Save video (' + (lastVideo.blob.size / 1048576).toFixed(1) + ' MB, ' + lastVideo.ext.toUpperCase() + ')';
+    } else el.saveVideo.hidden = true;
+    lastRec = '';
+  }
+  const t = fmt(pos) + ' / ' + fmt(dur);
+  if (t !== lastTime) { el.time.textContent = t; lastTime = t; }
+  if (!dragging) { const v = dur ? Math.round(pos / dur * 1000) : 0; if (Number(el.scrub.value) !== v) el.scrub.value = v; }
+  const label = playing ? 'Pause' : 'Play';
+  if (el.play.getAttribute('aria-label') !== label) {
+    el.play.setAttribute('aria-label', label);
+    $('playIcon').setAttribute('d', playing ? 'M6 4h4.5v16H6zM13.5 4H18v16h-4.5z' : 'M7 4.5v15l13-7.5z');
+  }
+  const rl = recording ? 'Stop recording \u00b7 ' + fmt(Math.max(0, pos - recInfo.start)) + ' / ' + fmt(recInfo.len) : 'Record video';
+  if (rl !== lastRec) { el.rec.textContent = rl; lastRec = rl; }
+}
+
+let lastT = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(.05, Math.max(.001, (now - lastT) / 1000)); lastT = now;
+  syncUI(false);
+  if (playing && analyser) { analyseReal(now, dt); renderFrame(now, dt); restyle = false; }
+  else if (!buffer && !reduceMotion) { synthAudio(now, dt); renderFrame(now, dt); restyle = false; }
+  else if (restyle) { restyle = false; renderStill(); }
+}
+
+/* ---------- wiring ---------- */
+function lookChanged() { primed = false; restyle = true; }
+const palWrap = $('pals');
+PALETTES.forEach((p, i) => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'pal'; b.setAttribute('aria-pressed', String(i === palIdx));
+  b.innerHTML = '<span class="sw" style="--b1:' + p.bg[0] + ';--b2:' + p.bg[1] + ';--g:' + p.stops.join(',') + '"></span><span>' + p.name + '</span>';
+  b.addEventListener('click', () => {
+    palIdx = i; lookChanged();
+    palWrap.querySelectorAll('.pal').forEach((x, j) => x.setAttribute('aria-pressed', String(j === i)));
+  });
+  palWrap.appendChild(b);
+});
+document.querySelectorAll('[data-style]').forEach(b => b.addEventListener('click', () => {
+  style = b.dataset.style; rings.length = 0; lookChanged();
+  document.querySelectorAll('[data-style]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+}));
+
+const fileInput = $('file');
+$('pick').addEventListener('click', () => fileInput.click());
+el.cta.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => { const f = fileInput.files[0]; fileInput.value = ''; loadFile(f); });
+$('safe').addEventListener('change', e => { $('safeBox').hidden = !e.target.checked; });
+
+el.play.addEventListener('click', togglePlay);
+el.scrub.addEventListener('pointerdown', () => { dragging = true; resumeAfter = playing; if (playing) pausePlayback(); });
+const endDrag = () => { if (!dragging) return; dragging = false; if (resumeAfter && buffer && !rec) play(pos); resumeAfter = false; };
+window.addEventListener('pointerup', endDrag); window.addEventListener('pointercancel', endDrag);
+el.scrub.addEventListener('input', () => {
+  if (!buffer) return;
+  const t = el.scrub.value / 1000 * dur;
+  if (dragging) pos = t; else if (playing) play(t); else pos = t;
+});
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space') return;
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(tag)) return;
+  e.preventDefault(); togglePlay();
+});
+
+el.rec.addEventListener('click', () => { if (rec) stopRecording(); else startRecording(); });
+el.png.addEventListener('click', savePng);
+el.saveVideo.addEventListener('click', () => { if (lastVideo) saveFile('wavereel-' + slug() + '.' + lastVideo.ext, lastVideo.blob); });
+
+let over = 0;
+window.addEventListener('dragenter', e => { e.preventDefault(); over++; el.frame.classList.add('over'); });
+window.addEventListener('dragleave', () => { over = Math.max(0, over - 1); if (!over) el.frame.classList.remove('over'); });
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault(); over = 0; el.frame.classList.remove('over');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+(async () => {
+  try { if (window.claude && window.claude.use) downloads = await window.claude.use('downloads'); } catch (e) { downloads = null; }
+})();
+
+syncUI(true);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
