@@ -132,6 +132,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
           <button class="btn" type="button" data-style="burst" aria-pressed="false">Starburst</button>
         </div>
         <label class="check"><input type="checkbox" id="safe"> Show TikTok safe area</label>
+        <p class="hint">Motion is smoothed and flashing is limited. That isn't a guarantee, so consider adding a photosensitivity warning to your post.</p>
       </fieldset>
 
       <div>
@@ -197,7 +198,7 @@ function outsideHues(p) {
   const hs = p.rgb.slice(0, 3).map(c => rgbHue(c[0], c[1], c[2]));
   const dist = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
   const cand = [];
-  for (let h = 0; h < 360; h += 10) cand.push({ h, s: Math.min(...hs.map(x => dist(h, x))) });
+  for (let h = 0; h < 360; h += 10) { if (h >= 340 || h <= 20) continue; cand.push({ h, s: Math.min(...hs.map(x => dist(h, x))) }); }
   cand.sort((a, b) => b.s - a.s);
   const out = [];
   for (const c of cand) {
@@ -211,14 +212,15 @@ function outsideHues(p) {
 PALETTES.forEach(p => { p.rgb = p.stops.concat(p.stops[0]).map(hexRgb); p.hues = outsideHues(p); });
 
 /* new-color accent: blends a hue from outside the palette into the flow after big changes */
-const acc = { amt: 0, hue: 0, rgb: [255, 255, 255], hold: 0, idx: 0, mode: 2 };
+const acc = { amt: 0, target: 0, hue: 0, rgb: [255, 255, 255], hold: 0, idx: 0, mode: 2 };
+const safe = { damp: 1 };
 let curT = 0;
 function colorAt(pal, u, a) {
   u = ((u % 1) + 1) % 1;
   const L = pal.rgb, f = u * (L.length - 1), i = Math.floor(f), k = f - i, p = L[i], q = L[i + 1];
   let r = p[0] + (q[0] - p[0]) * k, g = p[1] + (q[1] - p[1]) * k, b = p[2] + (q[2] - p[2]) * k;
   if (acc.amt > .01) {
-    const w = acc.amt * (.3 + .7 * (.5 + .5 * Math.sin((u * 2 + curT * .5) * TAU)));
+    const w = acc.amt * safe.damp * (.3 + .7 * (.5 + .5 * Math.sin((u * 2 + curT * .5) * TAU)));
     r += (acc.rgb[0] - r) * w; g += (acc.rgb[1] - g) * w; b += (acc.rgb[2] - b) * w;
   }
   return 'rgba(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ',' + a + ')';
@@ -239,10 +241,13 @@ function rrPath(c, x, y, w, h, r) {
 }
 
 /* ---------- audio analysis state ---------- */
-const NB = 64, WN = 256;
-const A = { bands: new Float32Array(NB), wave: new Float32Array(WN), bass: 0, mid: 0, tre: 0, beat: 0, hit: false };
-const rawB = new Float32Array(NB), rawW = new Float32Array(WN);
-let run = .3, wavePk = .1, bassAvg = 0, lastBeat = 0;
+const NB = 64, WN = 256, WD = 96;
+const A = {
+  bands: new Float32Array(NB), bs: new Float32Array(NB), wave: new Float32Array(WN), ws: new Float32Array(WD),
+  bass: 0, mid: 0, tre: 0, bassS: 0, midS: 0, beat: 0, pulse: 0, midP: 0, kick: 0, hit: false
+};
+const rawB = new Float32Array(NB), rawW = new Float32Array(WN), tmpW = new Float32Array(WD), tmpW2 = new Float32Array(WD);
+let run = .3, wavePk = .1, bassAvg = 0, lastBeat = 0, beatT = 0;
 let fd = null, td = null, bandLo = [], bandHi = [];
 
 const prevB = new Float32Array(NB);
@@ -250,26 +255,42 @@ let fluxAvg = .02, slowHi = .1, lastAcc = 0, lastEntry = 0;
 function triggerAccent(now, strength, hold) {
   const pal = PALETTES[palIdx];
   acc.hue = pal.hues[acc.idx++ % pal.hues.length];
-  acc.amt = strength; acc.hold = hold; lastAcc = now;
+  acc.target = strength; acc.hold = hold; lastAcc = now;
 }
 function updateAccent(now, dt) {
   const pal = PALETTES[palIdx];
-  if (!acc.mode) { acc.amt = 0; return; }
-  const bold = acc.mode === 2, top = bold ? 1 : .6, thr = bold ? 1 : 1.5;
+  if (!acc.mode) { acc.amt = 0; acc.target = 0; return; }
+  const bold = acc.mode === 2, top = bold ? .7 : .45, thr = bold ? 1 : 1.5;
   let flux = 0;
   for (let k = 0; k < NB; k++) { const d = A.bands[k] - prevB[k]; if (d > 0) flux += d * (.4 + 1.2 * k / NB); prevB[k] = A.bands[k]; }
   flux /= NB;
   fluxAvg = fluxAvg * .97 + flux * .03;
   const hi = A.mid * .4 + A.tre * .6, sl = 1 - Math.pow(.995, dt * 60);
   slowHi += (hi - slowHi) * sl;
-  if (now - lastEntry > 2500 && hi > slowHi * 1.7 * thr + .12) { triggerAccent(now, top, 1.2); lastEntry = now; }
-  else if (now - lastAcc > 350 && flux > fluxAvg * 3 * thr + .08) triggerAccent(now, top * .65, 0);
-  if (acc.hold > 0) acc.hold -= dt; else acc.amt *= Math.pow(.975, dt * 60);
+  if (now - lastEntry > 3000 && hi > slowHi * 1.7 * thr + .12) { triggerAccent(now, top, 1.2); lastEntry = now; }
+  else if (now - lastAcc > 1500 && flux > fluxAvg * 3 * thr + .08) triggerAccent(now, top * .6, 0);
+  if (acc.hold > 0) acc.hold -= dt; else acc.target *= Math.pow(.985, dt * 60);
+  acc.amt += (acc.target - acc.amt) * (1 - Math.pow(.93, dt * 60));
   acc.hue += 12 * dt;
-  acc.rgb = hslRgb(acc.hue, 1, pal.light ? .5 : .58);
+  acc.rgb = hslRgb(acc.hue, .85, pal.light ? .5 : .58);
 }
-function resetAccent() { acc.amt = 0; acc.hold = 0; acc.idx = 0; slowHi = .1; fluxAvg = .02; prevB.fill(0); }
+function resetAccent() { acc.amt = 0; acc.target = 0; acc.hold = 0; acc.idx = 0; slowHi = .1; fluxAvg = .02; prevB.fill(0); }
 
+/* smooth, low-jitter waveform for drawing: average down, blur, ease over time, soft-limit */
+function updateWave(dt) {
+  const step = WN / WD;
+  for (let j = 0; j < WD; j++) {
+    const a = Math.floor(j * step), b = Math.max(a + 1, Math.floor((j + 1) * step));
+    let s = 0; for (let i = a; i < b; i++) s += A.wave[i];
+    tmpW[j] = s / (b - a);
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const src = pass ? tmpW2 : tmpW, dst = pass ? tmpW : tmpW2;
+    for (let j = 0; j < WD; j++) dst[j] = (src[Math.max(0, j - 1)] + src[j] * 2 + src[Math.min(WD - 1, j + 1)]) / 4;
+  }
+  const k = 1 - Math.pow(.62, dt * 60), lim = Math.tanh(1.2);
+  for (let j = 0; j < WD; j++) A.ws[j] += (Math.tanh(tmpW[j] * 1.2) / lim - A.ws[j]) * k;
+}
 function summarise(now, dt) {
   let b = 0, m = 0, t = 0;
   for (let k = 0; k < 15; k++) b += A.bands[k];
@@ -277,8 +298,14 @@ function summarise(now, dt) {
   for (let k = 39; k < NB; k++) t += A.bands[k];
   A.bass = b / 15; A.mid = m / 24; A.tre = t / 25;
   bassAvg = bassAvg * .95 + A.bass * .05;
-  if (A.bass > bassAvg * 1.28 + .06 && now - lastBeat > 200) { A.beat = 1; A.hit = true; lastBeat = now; }
-  else A.beat *= Math.pow(.9, dt * 60);
+  if (A.bass > bassAvg * 1.28 + .06 && now - lastBeat > 500) { beatT = 1; A.hit = true; lastBeat = now; }
+  beatT *= Math.pow(.94, dt * 60);
+  A.beat += (beatT - A.beat) * (1 - Math.pow(.7, dt * 60));
+  const s = 1 - Math.pow(.88, dt * 60);
+  A.bassS += (A.bass - A.bassS) * s; A.midS += (A.mid - A.midS) * s;
+  A.pulse = A.bassS * safe.damp; A.midP = A.midS * safe.damp; A.kick = A.beat * safe.damp;
+  for (let k = 0; k < NB; k++) A.bs[k] = A.bands[Math.max(0, k - 1)] * .25 + A.bands[k] * .5 + A.bands[Math.min(NB - 1, k + 1)] * .25;
+  updateWave(dt);
   updateAccent(now, dt);
 }
 function analyseReal(now, dt) {
@@ -292,36 +319,36 @@ function analyseReal(now, dt) {
     rawB[k] = v; if (v > lvl) lvl = v;
   }
   run = Math.max(lvl, run * Math.pow(.9985, dt * 60));
-  const norm = 1 / Math.max(run, .3), dec = Math.pow(.8, dt * 60);
+  const norm = 1 / Math.max(run, .3), att = 1 - Math.pow(.4, dt * 60), dec = Math.pow(.88, dt * 60);
   for (let k = 0; k < NB; k++) {
-    const v = Math.pow(clamp(rawB[k] * norm, 0, 1), 1.35);
-    A.bands[k] = Math.max(v, A.bands[k] * dec);
+    const v = Math.pow(clamp(rawB[k] * norm, 0, 1), 1.35), p = A.bands[k];
+    A.bands[k] = v > p ? p + (v - p) * att : Math.max(v, p * dec);
   }
   let s0 = 0;
   for (let i = 1; i < td.length / 2; i++) if (td[i - 1] < 128 && td[i] >= 128) { s0 = i; break; }
   let pk = 0;
-  for (let j = 0; j < WN; j++) { const w = (td[s0 + j * 4] - 128) / 128; rawW[j] = w; if (Math.abs(w) > pk) pk = Math.abs(w); }
-  wavePk = Math.max(pk, wavePk * Math.pow(.995, dt * 60));
-  const g = clamp(.8 / Math.max(wavePk, .04), 1, 10);
   for (let j = 0; j < WN; j++) {
-    const a = rawW[Math.max(0, j - 1)], b = rawW[j], c = rawW[Math.min(WN - 1, j + 1)];
-    A.wave[j] = clamp((a + b * 2 + c) / 4 * g, -1.2, 1.2);
+    let sum = 0; for (let q = 0; q < 4; q++) sum += td[s0 + j * 4 + q];
+    const w = (sum / 4 - 128) / 128; rawW[j] = w; if (Math.abs(w) > pk) pk = Math.abs(w);
   }
+  wavePk = Math.max(pk, wavePk * Math.pow(.995, dt * 60));
+  const g = clamp(.8 / Math.max(wavePk, .04), 1, 6);
+  for (let j = 0; j < WN; j++) A.wave[j] = clamp(rawW[j] * g, -1.2, 1.2);
   summarise(now, dt);
 }
 function synthAudio(now, dt) {
-  const t = now / 1000, ph = (t * 2.1) % 1, kick = Math.exp(-ph * 5.5);
+  const t = now / 1000, ph = (t * 1.6) % 1, kick = Math.exp(-ph * 5);
   for (let k = 0; k < NB; k++) {
     const f = k / NB;
-    const v = (.3 + .7 * kick * (1 - f * .7)) * (.55 + .45 * Math.sin(t * 1.9 + k * .42 + Math.sin(t * .7) * 2)) * (1 - f * .45) + .05 * Math.sin(t * 9 + k);
+    const v = (.3 + .7 * kick * (1 - f * .7)) * (.55 + .45 * Math.sin(t * 1.5 + k * .3 + Math.sin(t * .7) * 2)) * (1 - f * .45);
     A.bands[k] = clamp(v, 0, 1);
   }
   const hp = t % 9, hiEnv = hp < 3 ? Math.exp(-hp * .8) : 0;
-  if (hiEnv > 0) for (let k = 36; k < NB; k++) A.bands[k] = clamp(A.bands[k] + hiEnv * .55 * (.6 + .4 * Math.sin(t * 14 + k)), 0, 1);
-  const amp = .55 + .45 * kick;
+  if (hiEnv > 0) for (let k = 36; k < NB; k++) A.bands[k] = clamp(A.bands[k] + hiEnv * .5 * (.65 + .35 * Math.sin(t * 6 + k * .3)), 0, 1);
+  const amp = .55 + .4 * kick;
   for (let j = 0; j < WN; j++) {
     const x = j / WN;
-    A.wave[j] = amp * (Math.sin(x * TAU * 3 + t * 6) * .55 + Math.sin(x * TAU * 7 - t * 9) * .25 * Math.sin(t * 1.3) + Math.sin(x * TAU * 13 + t * 3) * .12);
+    A.wave[j] = amp * (Math.sin(x * TAU * 3 + t * 4) * .55 + Math.sin(x * TAU * 6 - t * 6) * .25 * Math.sin(t * 1.3) + Math.sin(x * TAU * 9 + t * 2) * .1);
   }
   summarise(now, dt);
 }
@@ -339,114 +366,132 @@ function bgGrad(i) {
   return bgGrads[i];
 }
 const MODES = {
-  bars:    { zoom: .004, zb: .012, rot: 0,    keep: .90 },
-  kaleido: { zoom: .010, zb: .020, rot: .010, keep: .92 },
-  burst:   { zoom: .018, zb: .025, rot: .004, keep: .93 }
+  bars:    { zoom: .0025, zb: .004, rot: 0,    keep: .88 },
+  kaleido: { zoom: .004,  zb: .006, rot: .003, keep: .90 },
+  burst:   { zoom: .006,  zb: .008, rot: .002, keep: .90 }
 };
 let style = 'bars', palIdx = 0, primed = false;
+
+/* curve helpers: quadratic smoothing through midpoints, so no straight-segment jags */
+const CN = WD * 2 + 4, cxs = new Float32Array(CN), cys = new Float32Array(CN);
+function openCurve(c, n) {
+  c.moveTo(cxs[0], cys[0]);
+  for (let i = 1; i < n - 1; i++) c.quadraticCurveTo(cxs[i], cys[i], (cxs[i] + cxs[i + 1]) / 2, (cys[i] + cys[i + 1]) / 2);
+  c.lineTo(cxs[n - 1], cys[n - 1]);
+}
+function closedCurve(c, n) {
+  c.moveTo((cxs[n - 1] + cxs[0]) / 2, (cys[n - 1] + cys[0]) / 2);
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; c.quadraticCurveTo(cxs[i], cys[i], (cxs[i] + cxs[j]) / 2, (cys[i] + cys[j]) / 2); }
+  c.closePath();
+}
+function wsAt(x) {
+  x = clamp(x, 0, WD - 1);
+  const a = x | 0, b = Math.min(WD - 1, a + 1), f = x - a;
+  return A.ws[a] * (1 - f) + A.ws[b] * f;
+}
 
 const caps = new Float32Array(40), barH = new Float32Array(40);
 function modeBars(c, pal, t, dt) {
   const n = 40, pitch = W / n, bw = pitch * .6, maxH = 520, shift = t * .06, glow = !pal.light;
   for (let i = 0; i < n; i++) {
     const x = i * (NB - 1) / (n - 1), a = Math.floor(x), b = Math.min(NB - 1, a + 1);
-    const v = A.bands[a] * (1 - (x - a)) + A.bands[b] * (x - a);
-    barH[i] = 14 + v * maxH * (1 + A.beat * .1);
+    const v = A.bs[a] * (1 - (x - a)) + A.bs[b] * (x - a);
+    barH[i] = 14 + v * maxH * (1 + A.kick * .06);
   }
   if (glow) {
     c.globalCompositeOperation = 'lighter';
     for (let i = 0; i < n; i++) {
-      c.fillStyle = colorAt(pal, i / n * .9 + shift, .16); c.beginPath();
+      c.fillStyle = colorAt(pal, i / n * .9 + shift, .10); c.beginPath();
       rrPath(c, i * pitch + (pitch - bw) / 2 - 10, CY - barH[i] - 10, bw + 20, barH[i] * 2 + 20, (bw + 20) / 2); c.fill();
     }
     c.globalCompositeOperation = 'source-over';
   }
   for (let i = 0; i < n; i++) {
-    c.fillStyle = colorAt(pal, i / n * .9 + shift, .95); c.beginPath();
+    c.fillStyle = colorAt(pal, i / n * .9 + shift, .92); c.beginPath();
     rrPath(c, i * pitch + (pitch - bw) / 2, CY - barH[i], bw, barH[i] * 2, bw / 2); c.fill();
   }
-  c.fillStyle = pal.head; c.globalAlpha = .85;
+  c.fillStyle = pal.head; c.globalAlpha = .7;
   for (let i = 0; i < n; i++) {
-    caps[i] = Math.max(barH[i], caps[i] - 320 * dt);
+    caps[i] = Math.max(barH[i], caps[i] - 240 * dt);
     const x = i * pitch + (pitch - bw) / 2;
     c.beginPath(); rrPath(c, x, CY - caps[i] - 22, bw, 8, 4); rrPath(c, x, CY + caps[i] + 14, bw, 8, 4); c.fill();
   }
   c.globalAlpha = 1;
-  const waves = [{ amp: 300, ph: 0, w: 12, sh: 0, y: 0 }, { amp: 210, ph: 70, w: 6, sh: .33, y: 1 }, { amp: 150, ph: 150, w: 4, sh: .66, y: -1 }];
+  const waves = [{ amp: 300, w: 12, sh: 0, y: 0, ph: 0, mode: 0 }, { amp: 200, w: 6, sh: .33, y: 1, ph: 1.3, mode: 1 }, { amp: 140, w: 4, sh: .66, y: -1, ph: 2.6, mode: 2 }];
+  const NP = 72;
   c.lineCap = 'round'; c.lineJoin = 'round';
   for (const o of waves) {
-    const amp = o.amp * (.55 + A.bass * .9), yc = CY + Math.sin(t * .9 + o.ph) * 80 * o.y;
-    c.beginPath();
-    for (let j = 0; j < WN; j++) {
-      const x = j / (WN - 1) * W, y = yc + A.wave[(j + o.ph) % WN] * amp;
-      if (j) c.lineTo(x, y); else c.moveTo(x, y);
+    const amp = o.amp * (.5 + A.pulse * .6), yc = CY + Math.sin(t * .6 + o.ph) * 70 * o.y;
+    for (let j = 0; j < NP; j++) {
+      const u = j / (NP - 1), si = o.mode === 0 ? u : o.mode === 1 ? 1 - u : .25 + .5 * u;
+      cxs[j] = u * W; cys[j] = yc + wsAt(si * (WD - 1)) * amp * Math.pow(Math.sin(Math.PI * u), .6);
     }
+    c.beginPath(); openCurve(c, NP);
     c.strokeStyle = flowGrad(c, pal, 0, 0, W, 0, t * .08 + o.sh);
-    if (glow) { c.globalCompositeOperation = 'lighter'; c.globalAlpha = .18; c.lineWidth = o.w * 3.2; c.stroke(); c.globalCompositeOperation = 'source-over'; }
+    if (glow) { c.globalCompositeOperation = 'lighter'; c.globalAlpha = .12; c.lineWidth = o.w * 3; c.stroke(); c.globalCompositeOperation = 'source-over'; }
     c.globalAlpha = 1; c.lineWidth = o.w; c.stroke();
   }
 }
 function modeKaleido(c, pal, t) {
-  const K = 12, shift = t * .07, rot = t * .22 + A.beat * .15, R0 = 150 + A.bass * 120, glow = !pal.light;
+  const K = 12, shift = t * .05, rot = t * .06 + A.kick * .04, R0 = 150 + A.pulse * 80, glow = !pal.light;
   c.lineCap = 'round'; c.lineJoin = 'round';
-  const len = 430 + A.mid * 180, amp = 110 + A.bass * 170;
+  const len = 430 + A.midP * 100, amp = 100 + A.pulse * 110, NP = 72;
   for (let k = 0; k < K; k++) {
     c.save(); c.translate(CX, CY); c.rotate(rot + k * TAU / K); if (k & 1) c.scale(1, -1);
-    c.beginPath();
-    for (let j = 0; j < WN; j++) {
-      const x = R0 * .55 + j / (WN - 1) * len, y = A.wave[j] * amp;
-      if (j) c.lineTo(x, y); else c.moveTo(x, y);
+    for (let j = 0; j < NP; j++) {
+      const u = j / (NP - 1);
+      cxs[j] = R0 * .55 + u * len; cys[j] = wsAt(u * (WD - 1)) * amp * Math.pow(Math.sin(Math.PI * u), .5);
     }
-    if (glow) { c.globalCompositeOperation = 'lighter'; c.strokeStyle = colorAt(pal, k / K + shift, .16); c.lineWidth = 22; c.stroke(); c.globalCompositeOperation = 'source-over'; }
-    c.strokeStyle = colorAt(pal, k / K + shift, .95); c.lineWidth = 6; c.stroke();
+    c.beginPath(); openCurve(c, NP);
+    if (glow) { c.globalCompositeOperation = 'lighter'; c.strokeStyle = colorAt(pal, k / K + shift, .10); c.lineWidth = 20; c.stroke(); c.globalCompositeOperation = 'source-over'; }
+    c.strokeStyle = colorAt(pal, k / K + shift, .92); c.lineWidth = 6; c.stroke();
     c.restore();
   }
   const ring = (rad, ra, col, w) => {
-    c.beginPath();
-    for (let j = 0; j <= WN * 2; j++) {
-      const idx = j < WN ? j : 2 * WN - 1 - j, th = j / (WN * 2) * TAU - Math.PI / 2, r = rad + A.wave[Math.min(WN - 1, idx)] * ra;
-      const x = CX + Math.cos(th) * r, y = CY + Math.sin(th) * r;
-      if (j) c.lineTo(x, y); else c.moveTo(x, y);
+    const n = WD * 2;
+    for (let j = 0; j < n; j++) {
+      const idx = j < WD ? j : n - 1 - j, th = j / n * TAU - Math.PI / 2, r = rad + A.ws[idx] * ra;
+      cxs[j] = CX + Math.cos(th) * r; cys[j] = CY + Math.sin(th) * r;
     }
-    c.closePath(); c.strokeStyle = col; c.lineWidth = w; c.stroke();
+    c.beginPath(); closedCurve(c, n); c.strokeStyle = col; c.lineWidth = w; c.stroke();
   };
-  ring(R0, 70 + A.bass * 110, colorAt(pal, shift + .5, .95), 9);
-  ring(R0 * .62, 40 + A.bass * 60, pal.head, 4);
+  ring(R0, 60 + A.pulse * 70, colorAt(pal, shift + .5, .92), 9);
+  ring(R0 * .62, 34 + A.pulse * 40, pal.head, 4);
 }
 const rings = [];
 function modeBurst(c, pal, t, dt) {
-  const n = 96, shift = t * .06, R0 = 140 + A.bass * 70, glow = !pal.light, spin = t * .15;
+  const n = 96, shift = t * .05, R0 = 140 + A.pulse * 45, glow = !pal.light, spin = t * .08;
   if (A.hit) rings.push({ r: R0, a: 1 });
   c.lineCap = 'round';
   const lens = [];
   for (let i = 0; i < n; i++) {
     const tt = i / n, m = tt < .5 ? tt * 2 : (1 - tt) * 2, x = m * (NB - 1), a = Math.floor(x), b = Math.min(NB - 1, a + 1);
-    lens.push(30 + (A.bands[a] * (1 - (x - a)) + A.bands[b] * (x - a)) * 360 * (1 + A.beat * .12));
+    lens.push(30 + (A.bs[a] * (1 - (x - a)) + A.bs[b] * (x - a)) * 340 * (1 + A.kick * .08));
   }
   for (let pass = glow ? 0 : 1; pass < 2; pass++) {
     if (pass === 0) c.globalCompositeOperation = 'lighter';
     for (let i = 0; i < n; i++) {
       const tt = i / n, ang = tt * TAU - Math.PI / 2 + spin, ca = Math.cos(ang), sa = Math.sin(ang);
       c.beginPath(); c.moveTo(CX + ca * R0, CY + sa * R0); c.lineTo(CX + ca * (R0 + lens[i]), CY + sa * (R0 + lens[i]));
-      c.strokeStyle = colorAt(pal, tt + shift, pass ? .95 : .15); c.lineWidth = pass ? 13 : 30; c.stroke();
+      c.strokeStyle = colorAt(pal, tt + shift, pass ? .92 : .10); c.lineWidth = pass ? 13 : 28; c.stroke();
     }
     c.globalCompositeOperation = 'source-over';
   }
   for (let i = rings.length - 1; i >= 0; i--) {
-    const o = rings[i]; o.r += 700 * dt; o.a -= 1.3 * dt;
+    const o = rings[i]; o.r += 450 * dt; o.a -= 1.0 * dt;
     if (o.a <= 0) { rings.splice(i, 1); continue; }
-    c.beginPath(); c.arc(CX, CY, o.r, 0, TAU); c.strokeStyle = colorAt(pal, shift + o.r / 1000, o.a * .7); c.lineWidth = 6 + o.a * 8; c.stroke();
+    c.beginPath(); c.arc(CX, CY, o.r, 0, TAU); c.strokeStyle = colorAt(pal, shift + o.r / 1000, o.a * .5); c.lineWidth = 5 + o.a * 4; c.stroke();
   }
   const dr = R0 - 14, g = c.createRadialGradient(CX, CY, 0, CX, CY, dr);
-  g.addColorStop(0, colorAt(pal, shift + .3, .95)); g.addColorStop(1, pal.bg[0]);
+  g.addColorStop(0, colorAt(pal, shift + .3, .92)); g.addColorStop(1, pal.bg[0]);
   c.beginPath(); c.arc(CX, CY, dr, 0, TAU); c.fillStyle = g; c.fill();
   c.lineWidth = 5; c.strokeStyle = pal.head; c.stroke();
-  c.beginPath();
-  for (let j = 0; j < WN; j++) {
-    const x = CX - dr + 24 + j / (WN - 1) * (dr * 2 - 48), y = CY + A.wave[j] * 60;
-    if (j) c.lineTo(x, y); else c.moveTo(x, y);
+  const NP = 48;
+  for (let j = 0; j < NP; j++) {
+    const u = j / (NP - 1);
+    cxs[j] = CX - dr + 24 + u * (dr * 2 - 48); cys[j] = CY + wsAt(u * (WD - 1)) * 55 * Math.pow(Math.sin(Math.PI * u), .5);
   }
-  c.lineWidth = 5; c.lineJoin = 'round'; c.strokeStyle = pal.head; c.stroke();
+  c.beginPath(); openCurve(c, NP); c.lineWidth = 5; c.lineJoin = 'round'; c.strokeStyle = pal.head; c.stroke();
 }
 
 function renderFrame(now, dt) {
@@ -458,15 +503,15 @@ function renderFrame(now, dt) {
   } else {
     fbx.globalCompositeOperation = 'copy'; fbx.drawImage(cv, 0, 0);
     c.fillStyle = bgGrad(palIdx); c.fillRect(0, 0, W, H);
-    const z = 1 + (P.zoom + A.bass * P.zb) * f * m;
-    const r = (P.rot * (1 + A.mid * 2) + (style === 'bars' ? Math.sin(t * .5) * .003 : 0)) * f * m;
+    const z = 1 + (P.zoom + A.pulse * P.zb) * f * m;
+    const r = (P.rot * (1 + A.midP * 2) + (style === 'bars' ? Math.sin(t * .5) * .002 : 0)) * f * m;
     c.save(); c.globalAlpha = Math.pow(P.keep, f);
     c.translate(CX, CY); c.rotate(r); c.scale(z, z); c.translate(-CX, -CY);
     c.drawImage(fbc, 0, 0); c.restore();
   }
   if (!pal.light) {
     const g = c.createRadialGradient(CX, CY, 0, CX, CY, 720);
-    g.addColorStop(0, colorAt(pal, t * .05, .10 + A.bass * .14)); g.addColorStop(1, colorAt(pal, t * .05, 0));
+    g.addColorStop(0, colorAt(pal, t * .05, .06 + A.pulse * .06)); g.addColorStop(1, colorAt(pal, t * .05, 0));
     c.globalCompositeOperation = 'lighter'; c.fillStyle = g; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'source-over';
   }
   c.save();
@@ -484,6 +529,23 @@ function renderStill() {
     if (!hasPlayed) synthAudio(now, 1 / 60);
     renderFrame(now, 1 / 60);
   }
+}
+
+/* flash governor: watches overall screen brightness and eases every reactive effect down
+   whenever the picture changes too fast between checks */
+const gc = document.createElement('canvas'); gc.width = 24; gc.height = 42;
+const gx = gc.getContext('2d');
+let gLum = -1, gN = 0;
+function governor() {
+  if ((gN++ & 3) !== 0) return;
+  let d;
+  try { gx.drawImage(cv, 0, 0, 24, 42); d = gx.getImageData(0, 0, 24, 42).data; } catch (e) { return; }
+  let s = 0;
+  for (let i = 0; i < d.length; i += 4) { const r = d[i] / 255, g = d[i + 1] / 255, b = d[i + 2] / 255; s += .2126 * r * r + .7152 * g * g + .0722 * b * b; }
+  const L = s / (d.length / 4);
+  if (gLum >= 0 && Math.abs(L - gLum) > .05) safe.damp = Math.max(.35, safe.damp - .3);
+  gLum = L;
+  safe.damp = Math.min(1, safe.damp + .03);
 }
 
 /* ---------- state ---------- */
@@ -653,8 +715,8 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(.05, Math.max(.001, (now - lastT) / 1000)); lastT = now;
   syncUI(false);
-  if (playing && analyser) { analyseReal(now, dt); renderFrame(now, dt); restyle = false; }
-  else if (!buffer && !reduceMotion) { synthAudio(now, dt); renderFrame(now, dt); restyle = false; }
+  if (playing && analyser) { analyseReal(now, dt); renderFrame(now, dt); governor(); restyle = false; }
+  else if (!buffer && !reduceMotion) { synthAudio(now, dt); renderFrame(now, dt); governor(); restyle = false; }
   else if (restyle) { restyle = false; renderStill(); }
 }
 
